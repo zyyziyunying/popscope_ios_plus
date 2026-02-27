@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'popscope_ios_plus'
-  s.version          = '0.1.2'
+  s.version          = '0.1.3'
   s.summary          = 'Enhanced iOS pop gesture interceptor for Flutter.'
   s.description      = <<-DESC
 Enhanced iOS pop gesture interceptor for Flutter. Provides fine-grained control over iOS left-edge swipe gestures with per-page callbacks, automatic cleanup, and better performance.

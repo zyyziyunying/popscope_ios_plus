@@ -1,6 +1,6 @@
 name: popscope_ios_plus
 description: "Enhanced iOS pop gesture interceptor for Flutter with per-page callbacks, automatic cleanup, and fine-grained control over swipe gestures."
-version: 0.1.2
+version: 0.1.3
 homepage: https://github.com/zyyziyunying/popscope_ios_plus
 repository: https://github.com/zyyziyunying/popscope_ios_plus
 issue_tracker: https://github.com/zyyziyunying/popscope_ios_plus/issues

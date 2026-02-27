@@ -38,7 +38,7 @@ Add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  popscope_ios_plus: ^0.1.0
+  popscope_ios_plus: ^0.1.3
 ```
 
 Then run:
