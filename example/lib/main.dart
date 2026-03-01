@@ -9,7 +9,6 @@ import 'package:popscope_ios_plus_example/pages/popscope_example_page.dart';
 import 'package:popscope_ios_plus_example/pages/nested_example_page.dart';
 import 'package:popscope_ios_plus_example/pages/bad_example_page.dart';
 import 'package:popscope_ios_plus_example/pages/comparison_example_page.dart';
-import 'package:popscope_ios_plus_example/pages/direct_mode_test_page.dart';
 
 /// 创建全局 Navigator Key
 ///
@@ -204,22 +203,6 @@ class _HomePageState extends State<HomePage> {
                 );
               },
             ),
-            const SizedBox(height: 16),
-            ExampleCard(
-              title: '[实验] 直接模式测试',
-              description: '测试 UIScreenEdgePanGestureRecognizer 方案',
-              icon: Icons.science,
-              color: Colors.orange,
-              badge: 'MVP',
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const DirectModeTestPage(),
-                  ),
-                );
-              },
-            ),
             const SizedBox(height: 20),
 
             // 说明卡片
@@ -253,8 +236,7 @@ class _HomePageState extends State<HomePage> {
                       '• PopScope 集成：与 Flutter 3.12+ 的 PopScope 集成\n'
                       '• 多页面嵌套：验证回调栈管理机制\n'
                       '• 负面示例：展示全局回调覆盖的问题\n'
-                      '• 库对比：对比 popscope_ios 与其他库的优势\n'
-                      '• 直接模式测试：验证 UIScreenEdgePanGestureRecognizer 方案',
+                      '• 库对比：对比 popscope_ios 与其他库的优势',
                       style: TextStyle(fontSize: 14),
                     ),
                   ],

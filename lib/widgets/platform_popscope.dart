@@ -14,6 +14,7 @@ class PlatformPopScope extends StatelessWidget {
     required this.child,
     required this.canPop,
     required this.onPop,
+    @Deprecated('Direct Mode 已下线，此参数仅保留兼容，不再启用原生 direct 链路。')
     this.useDirectEdgeGesture = false,
     this.enableEdgeGuard,
     this.edgeGuardWidth = 44,
@@ -22,6 +23,7 @@ class PlatformPopScope extends StatelessWidget {
   final Widget child;
   final bool canPop;
   final VoidCallback onPop;
+  @Deprecated('Direct Mode 已下线，此参数仅保留兼容。')
   final bool useDirectEdgeGesture;
   final bool? enableEdgeGuard;
   final double edgeGuardWidth;

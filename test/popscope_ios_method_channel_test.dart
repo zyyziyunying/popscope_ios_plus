@@ -21,9 +21,6 @@ void main() {
           if (methodCall.method == 'enableInteractivePopGesture') {
             return null;
           }
-          if (methodCall.method == 'enableDirectEdgeGesture') {
-            return true;
-          }
           return null;
         });
   });
@@ -263,48 +260,12 @@ void main() {
     );
   });
 
-  group('enableDirectEdgeGesture', () {
-    test('调用 enableDirectEdgeGesture 应该触发对应的 method channel', () async {
-      bool enableCalled = false;
-
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
-            if (methodCall.method == 'enableDirectEdgeGesture') {
-              enableCalled = true;
-              return true;
-            }
-            return null;
-          });
-
-      await platform.enableDirectEdgeGesture();
-
-      expect(enableCalled, true);
-    });
-
-    test('启用 direct 模式后不应再触发 enableInteractivePopGesture', () async {
-      bool enableDirectCalled = false;
-      bool enableInteractiveCalled = false;
-      final navigatorKey = GlobalKey<NavigatorState>();
-
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
-            if (methodCall.method == 'enableDirectEdgeGesture') {
-              enableDirectCalled = true;
-              return true;
-            }
-            if (methodCall.method == 'enableInteractivePopGesture') {
-              enableInteractiveCalled = true;
-            }
-            return null;
-          });
-
-      await platform.enableDirectEdgeGesture();
-      platform.setNavigatorKey(navigatorKey);
-
-      await Future.delayed(const Duration(milliseconds: 10));
-
-      expect(enableDirectCalled, true);
-      expect(enableInteractiveCalled, false);
+  group('direct mode decommissioned', () {
+    test('调用 enableDirectEdgeGesture 应抛出 UnsupportedError', () async {
+      expect(
+        platform.enableDirectEdgeGesture(),
+        throwsA(isA<UnsupportedError>()),
+      );
     });
   });
 }

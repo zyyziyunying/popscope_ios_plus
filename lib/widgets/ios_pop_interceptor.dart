@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/cupertino.dart';
 import 'package:popscope_ios_plus/popscope_ios.dart';
+import 'package:popscope_ios_plus/utils/logger.dart';
 
 /// iOS 边缘滑动手势拦截器
 ///
@@ -15,6 +16,7 @@ class IosPopInterceptor extends StatefulWidget {
     super.key,
     required this.child,
     required this.onPopGesture,
+    @Deprecated('Direct Mode 已下线，此参数仅保留兼容，不再启用原生 direct 链路。')
     this.useDirectEdgeGesture = false,
     this.enableEdgeGuard,
     this.edgeGuardWidth = 44,
@@ -27,9 +29,10 @@ class IosPopInterceptor extends StatefulWidget {
   /// 当用户从左边缘向右滑动时调用
   final VoidCallback onPopGesture;
 
-  /// 是否启用实验性的直接边缘手势模式
+  /// [已下线] Direct Mode 开关，仅保留兼容。
   ///
-  /// 启用后会先尝试调用原生 direct 模式，再注册回调，避免落回 interactive 模式。
+  /// 该参数不再触发原生 direct 模式，仅作为 edge guard 默认值的兼容别名。
+  @Deprecated('Direct Mode 已下线，此参数仅保留兼容。')
   final bool useDirectEdgeGesture;
 
   /// 是否启用左边缘手势防护层
@@ -49,37 +52,24 @@ class IosPopInterceptor extends StatefulWidget {
 class _IosPopInterceptorState extends State<IosPopInterceptor> {
   /// 是否已经注册回调
   bool _isRegistered = false;
-  bool _directModeEnabled = false;
+  bool _directModeWarned = false;
 
   bool get _shouldUseEdgeGuard {
     if (widget.enableEdgeGuard != null) {
       return widget.enableEdgeGuard!;
     }
+    // 兼容旧参数：在未显式传入 enableEdgeGuard 时，沿用旧行为。
     return widget.useDirectEdgeGesture;
   }
 
   @override
   void initState() {
     super.initState();
-    if (Platform.isIOS && widget.useDirectEdgeGesture) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _enableDirectMode();
-      });
-    }
-  }
-
-  Future<void> _enableDirectMode() async {
-    try {
-      await PopscopeIos.enableDirectEdgeGestureForTesting();
-      if (!mounted) return;
-      setState(() {
-        _directModeEnabled = true;
-      });
-      _registerCallbackIfNeeded();
-    } catch (_) {
-      if (!mounted) return;
-      // direct 模式失败时回退到默认注册流程
-      _registerCallbackIfNeeded();
+    if (Platform.isIOS && widget.useDirectEdgeGesture && !_directModeWarned) {
+      _directModeWarned = true;
+      PopscopeLogger.warn(
+        'useDirectEdgeGesture 已下线，将自动回退到默认 interactivePopGesture 链路。',
+      );
     }
   }
 
@@ -91,6 +81,7 @@ class _IosPopInterceptorState extends State<IosPopInterceptor> {
     if (!Platform.isIOS || _isRegistered) {
       return;
     }
+
     /// 使用注册机制，支持多个页面同时使用，避免回调覆盖
     /// 传递 context 作为唯一标识，确保只有顶层页面的回调会被调用
     /// 在 didChangeDependencies 中注册，确保 context 已准备好
@@ -101,12 +92,6 @@ class _IosPopInterceptorState extends State<IosPopInterceptor> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (widget.useDirectEdgeGesture) {
-      if (_directModeEnabled) {
-        _registerCallbackIfNeeded();
-      }
-      return;
-    }
     _registerCallbackIfNeeded();
   }
 
@@ -136,9 +121,7 @@ class _IosPopInterceptorState extends State<IosPopInterceptor> {
       },
     );
 
-    if (Platform.isIOS &&
-        _shouldUseEdgeGuard &&
-        widget.edgeGuardWidth > 0) {
+    if (Platform.isIOS && _shouldUseEdgeGuard && widget.edgeGuardWidth > 0) {
       content = Stack(
         children: [
           content,

@@ -262,47 +262,12 @@ class MethodChannelPopscopeIos extends PopscopeIosPlatform {
     }
   }
 
-  /// [实验性] 启用直接边缘手势模式
-  ///
-  /// 该模式使用 UIScreenEdgePanGestureRecognizer 直接监听左边缘滑动，
-  /// 不依赖 UINavigationController。
-  ///
-  /// **注意**：此方法为实验性功能，用于 MVP 验证。
-  /// 生产环境请继续使用默认的 enableInteractivePopGesture。
-  ///
-  /// 验证点：
-  /// - 手势是否能正常触发
-  /// - 是否与 Flutter 手势冲突
-  /// - 在滑动列表时是否会误触发
-  /// - 手势灵敏度是否可接受
+  @Deprecated('Direct Mode 已下线。请使用默认的 interactivePopGesture 拦截链路。')
   Future<void> enableDirectEdgeGesture() async {
-    _ensureHandlerInitialized();
-    try {
-      final result = await methodChannel.invokeMethod(
-        'enableDirectEdgeGesture',
-      );
-      bool success = false;
-      if (result is bool) {
-        success = result;
-      } else if (result is Map) {
-        final info = Map<String, dynamic>.from(result);
-        success = info['success'] == true;
-        PopscopeLogger.debug('Direct edge gesture setup info: $info');
-      }
-
-      if (!success) {
-        PopscopeLogger.warn(
-          'Direct edge gesture setup failed on iOS (result: $result)',
-        );
-        return;
-      }
-
-      _iosGestureEnabled = true;
-      PopscopeLogger.debug('Direct edge gesture mode enabled');
-    } catch (e, stackTrace) {
-      PopscopeLogger.error('enableDirectEdgeGesture failed: $e\n$stackTrace');
-      rethrow;
-    }
+    PopscopeLogger.warn(
+      'Direct Mode 已下线（direct_mode_rebuild_decision）。当前调用将被拒绝。',
+    );
+    throw UnsupportedError('Direct Mode 已下线，待重构版完成后再开放。');
   }
 
   @override

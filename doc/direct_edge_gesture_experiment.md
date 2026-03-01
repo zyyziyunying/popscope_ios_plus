@@ -1,5 +1,15 @@
 # 实验性方案：UIScreenEdgePanGestureRecognizer 直接模式
 
+> 状态：已下线（2026-03-01）  
+> 依据：`doc/direct_mode_rebuild_decision.md`（停止修补旧实现，清理并重构）
+
+## 状态更新（2026-03-01）
+
+- `enableDirectEdgeGesture` 原生通道已移除。
+- Dart 侧 Direct Mode API 已标记下线并改为抛出 `UnsupportedError`。
+- Example 的「直接模式测试」入口与页面已下线。
+- 本文档仅作为历史实验记录，不再作为当前实现依据。
+
 ## 背景
 
 ### 原有方案的工作原理
