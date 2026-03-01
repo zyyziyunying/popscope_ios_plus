@@ -307,6 +307,34 @@ void main() {
       expect(enableCount, 1);
     });
 
+    test('enable 失败后应回滚状态并允许后续重试', () async {
+      int enableCount = 0;
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+            if (methodCall.method == 'enableInteractivePopGesture') {
+              enableCount++;
+              if (enableCount == 1) {
+                throw PlatformException(code: 'mock_enable_failed');
+              }
+              return <String, dynamic>{
+                'success': true,
+                'state': 'enabled',
+                'reason': 'delegate_hooked',
+              };
+            }
+            return null;
+          });
+
+      platform.setOnSystemBackGesture(() {});
+      await Future.delayed(const Duration(milliseconds: 10));
+      expect(enableCount, 1);
+
+      platform.setOnSystemBackGesture(() {});
+      await Future.delayed(const Duration(milliseconds: 10));
+      expect(enableCount, 2);
+    });
+
     testWidgets('注销最后一个页面回调后应触发 disableInteractivePopGesture', (
       WidgetTester tester,
     ) async {
@@ -344,6 +372,44 @@ void main() {
 
       expect(enableCount, 1);
       expect(disableCount, 1);
+    });
+
+    testWidgets('missing_root 失败后应在首帧后自动重试 enable', (
+      WidgetTester tester,
+    ) async {
+      int enableCount = 0;
+      final navigatorKey = GlobalKey<NavigatorState>();
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+            if (methodCall.method == 'enableInteractivePopGesture') {
+              enableCount++;
+              if (enableCount == 1) {
+                return <String, dynamic>{
+                  'success': false,
+                  'state': 'disabled',
+                  'reason': 'missing_root',
+                };
+              }
+              return <String, dynamic>{
+                'success': true,
+                'state': 'enabled',
+                'reason': 'delegate_hooked',
+              };
+            }
+            return null;
+          });
+
+      await tester.pumpWidget(
+        MaterialApp(navigatorKey: navigatorKey, home: const SizedBox.shrink()),
+      );
+
+      platform.setNavigatorKey(navigatorKey);
+      await tester.pump();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 16));
+
+      expect(enableCount, 2);
     });
   });
 

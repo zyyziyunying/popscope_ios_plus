@@ -1,5 +1,8 @@
 # UINavigationController 包裹的测试清单
 
+> ⚠️ 状态说明（2026-03-01）：本文件为历史检查项沉淀。  
+> Direct Mode 重构当前阶段（M1 -> M2）请以 `doc/direct_mode_m1_to_m2_gate.md` 为唯一准入标准。
+
 ## ⚠️ 重要说明
 当前实现会在必要时动态创建 UINavigationController 包裹 FlutterViewController。
 虽然代码会优先使用已有的 NavigationController，但在某些情况下会运行时替换 rootViewController。

@@ -1,7 +1,7 @@
 # Direct Mode 实验功能问题记录与重构决策
 
 > 日期：2026-03-01  
-> 状态：已确认（Owner 同意“完全重构，忽略旧实现”）
+> 状态：执行中（M1 收口中，核心阻塞已处理，待补测试矩阵）
 
 ## 1. 文档目的
 
@@ -107,6 +107,8 @@
 - M2：补齐单测/集成测试与手测矩阵，形成稳定验收标准。  
 - M3：灰度开放示例，验证 WebView/横滑组件/多路由场景。
 
+> M1 -> M2 的强制准入门槛见：`doc/direct_mode_m1_to_m2_gate.md`
+
 ---
 
 ## 7. 验收门槛（重构版）
@@ -134,14 +136,26 @@
 3. 已将 Dart 侧 Direct Mode API 标记为废弃并改为拒绝调用。  
 4. 已补充文档状态说明（实验文档标记为历史归档）。  
 
-### 下一步（M1）
-
-1. 新建“单一信号源 + 状态机 + 生命周期回收”最小实现骨架。  
-2. 先补测试矩阵草案，再开放新的示例入口。
-
-### 已完成（M1-骨架，2026-03-01）
+### 已完成（M1-骨架 + 收口补强，2026-03-01）
 
 1. iOS 端新增 interactive-pop 生命周期状态机（`disabled/enabling/enabled/disabling`），并补齐 `enable/disable` 成对通道。  
 2. Dart 端新增原生生命周期同步器：基于 consumer 状态自动启停原生手势钩子，避免页面退出后残留。  
 3. 新增结构化日志字段（`source/state/route/action`）并贯穿 native -> Dart 事件链路。  
-4. 补充 MethodChannel 生命周期单测：验证 disable 回收与 enable 幂等行为。
+4. 补充 MethodChannel 生命周期单测：验证 disable 回收与 enable 幂等行为。  
+5. native `enable/disable` 改为显式返回（`success/state/reason`），Dart 侧改为 await 结果并失败回滚，修复状态分裂。  
+6. 补齐 `missing_root` 失败路径自动重试（首帧后重试，最多 3 次）。  
+7. `IosPopInterceptor` 增加同帧防重入，降低 native 事件与 `onPopInvokedWithResult` 双触发。  
+8. native delegate 增加导航栈深度与原 delegate 协同判定，补强误触发防线。  
+9. 补充生命周期回归单测：enable 失败回滚可重试、`missing_root` 自动重试。  
+10. 补齐 `example/integration_test` 核心链路（回调优先、自动 maybePop、disable 回收、`missing_root` 重试、异常路径）并完成 iOS 模拟器执行。
+
+### M1 收口剩余阻塞项（2026-03-01）
+
+1. G5 手测矩阵（WebView/横滑组件/多路由/快速手势/前后台切换）尚未补齐，无法给出稳定性结论。  
+2. `missing_root` 重试策略已实现，但复杂宿主启动时序仍需真机回归确认。
+
+### 下一步（M1 收口 -> M2 准入）
+
+1. 按 `doc/direct_mode_m1_to_m2_gate.md` 执行并记录 G5 手测矩阵（含设备、结果、问题单）。  
+2. 完成 iOS 真机回归，确认 `missing_root` 重试在不同宿主启动时序下稳定。  
+3. 回填 Gate 评审记录后，再评估是否进入 M2。  

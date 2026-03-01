@@ -41,6 +41,49 @@ class _CallbackEntry {
 
 enum _NativeGestureLifecycleState { disabled, enabling, enabled, disabling }
 
+class _NativeLifecycleCallResult {
+  const _NativeLifecycleCallResult({
+    required this.success,
+    required this.state,
+    required this.reason,
+  });
+
+  final bool success;
+  final String state;
+  final String reason;
+
+  bool get isMissingRootFailure => !success && reason == 'missing_root';
+
+  factory _NativeLifecycleCallResult.fromPlatformResponse(Object? response) {
+    // 兼容旧 native：历史版本返回 null，按成功处理，避免误回滚。
+    if (response == null) {
+      return const _NativeLifecycleCallResult(
+        success: true,
+        state: 'legacy',
+        reason: 'legacy_nil_response',
+      );
+    }
+
+    if (response is Map) {
+      final payload = Map<String, dynamic>.from(response);
+      final success = payload['success'];
+      final state = payload['state']?.toString() ?? 'unknown';
+      final reason = payload['reason']?.toString() ?? 'unknown';
+      return _NativeLifecycleCallResult(
+        success: success is bool ? success : true,
+        state: state,
+        reason: reason,
+      );
+    }
+
+    return const _NativeLifecycleCallResult(
+      success: false,
+      state: 'unknown',
+      reason: 'invalid_response',
+    );
+  }
+}
+
 /// 使用 Method Channel 实现的 [PopscopeIosPlatform]
 ///
 /// 该类负责与 iOS 原生端通信，接收左滑返回手势事件并处理。
@@ -72,6 +115,15 @@ class MethodChannelPopscopeIos extends PopscopeIosPlatform {
   /// 原生手势生命周期状态机
   _NativeGestureLifecycleState _nativeGestureLifecycleState =
       _NativeGestureLifecycleState.disabled;
+
+  /// 生命周期同步队列，避免并发调用 native enable/disable 造成状态乱序。
+  bool _isLifecycleSyncInProgress = false;
+  bool _needsLifecycleSync = false;
+
+  /// missing_root 失败重试控制。
+  bool _missingRootRetryScheduled = false;
+  int _missingRootRetryAttempts = 0;
+  static const int _maxMissingRootRetryAttempts = 3;
 
   MethodChannelPopscopeIos() {
     // 延迟设置 method call handler，避免在 binding 初始化前调用
@@ -284,16 +336,43 @@ class MethodChannelPopscopeIos extends PopscopeIosPlatform {
 
   /// 生命周期调度入口：根据当前 consumer 状态自动 enable/disable 原生钩子
   void _scheduleNativeLifecycleSync({required String reason}) {
-    final shouldEnable = _hasActiveBackIntentConsumer;
     _logBackIntent(action: 'lifecycle_schedule_$reason');
-    _reconcileNativeLifecycle(shouldEnable: shouldEnable);
+    _enqueueLifecycleSync();
   }
 
-  void _reconcileNativeLifecycle({required bool shouldEnable}) {
+  void _enqueueLifecycleSync() {
+    if (_isLifecycleSyncInProgress) {
+      _needsLifecycleSync = true;
+      return;
+    }
+
+    _isLifecycleSyncInProgress = true;
+    unawaited(_drainLifecycleSyncQueue());
+  }
+
+  Future<void> _drainLifecycleSyncQueue() async {
+    try {
+      do {
+        _needsLifecycleSync = false;
+        final shouldEnable = _hasActiveBackIntentConsumer;
+        await _reconcileNativeLifecycle(shouldEnable: shouldEnable);
+      } while (_needsLifecycleSync);
+    } finally {
+      _isLifecycleSyncInProgress = false;
+      if (_needsLifecycleSync) {
+        _enqueueLifecycleSync();
+      }
+    }
+  }
+
+  Future<void> _reconcileNativeLifecycle({required bool shouldEnable}) async {
     final isEnabled =
         _nativeGestureLifecycleState == _NativeGestureLifecycleState.enabled ||
         _nativeGestureLifecycleState == _NativeGestureLifecycleState.enabling;
     if (shouldEnable == isEnabled) {
+      if (!shouldEnable) {
+        _resetMissingRootRetry();
+      }
       return;
     }
 
@@ -302,19 +381,22 @@ class MethodChannelPopscopeIos extends PopscopeIosPlatform {
         _NativeGestureLifecycleState.enabling,
         action: 'native_enable_requested',
       );
-      unawaited(
-        methodChannel
-            .invokeMethod<void>('enableInteractivePopGesture')
-            .catchError((Object e, StackTrace stackTrace) {
-              PopscopeLogger.error(
-                'enableInteractivePopGesture failed: $e\n$stackTrace',
-              );
-            }),
+      final nativeResult = await _invokeNativeLifecycleMethod(
+        'enableInteractivePopGesture',
       );
-      _transitionLifecycle(
-        _NativeGestureLifecycleState.enabled,
-        action: 'native_enable_completed',
-      );
+      if (nativeResult.success) {
+        _transitionLifecycle(
+          _NativeGestureLifecycleState.enabled,
+          action: 'native_enable_completed_${nativeResult.reason}',
+        );
+        _resetMissingRootRetry();
+      } else {
+        _transitionLifecycle(
+          _NativeGestureLifecycleState.disabled,
+          action: 'native_enable_failed_${nativeResult.reason}',
+        );
+        _scheduleMissingRootRetryIfNeeded(nativeResult);
+      }
       return;
     }
 
@@ -322,19 +404,91 @@ class MethodChannelPopscopeIos extends PopscopeIosPlatform {
       _NativeGestureLifecycleState.disabling,
       action: 'native_disable_requested',
     );
-    unawaited(
-      methodChannel
-          .invokeMethod<void>('disableInteractivePopGesture')
-          .catchError((Object e, StackTrace stackTrace) {
-            PopscopeLogger.error(
-              'disableInteractivePopGesture failed: $e\n$stackTrace',
-            );
-          }),
+    final nativeResult = await _invokeNativeLifecycleMethod(
+      'disableInteractivePopGesture',
     );
-    _transitionLifecycle(
-      _NativeGestureLifecycleState.disabled,
-      action: 'native_disable_completed',
-    );
+    if (nativeResult.success) {
+      _transitionLifecycle(
+        _NativeGestureLifecycleState.disabled,
+        action: 'native_disable_completed_${nativeResult.reason}',
+      );
+      _resetMissingRootRetry();
+    } else {
+      _transitionLifecycle(
+        _NativeGestureLifecycleState.enabled,
+        action: 'native_disable_failed_${nativeResult.reason}',
+      );
+    }
+  }
+
+  Future<_NativeLifecycleCallResult> _invokeNativeLifecycleMethod(
+    String method,
+  ) async {
+    try {
+      final response = await methodChannel.invokeMethod<Object?>(method);
+      return _NativeLifecycleCallResult.fromPlatformResponse(response);
+    } on PlatformException catch (e, stackTrace) {
+      PopscopeLogger.error('$method failed: $e\n$stackTrace');
+      return const _NativeLifecycleCallResult(
+        success: false,
+        state: 'error',
+        reason: 'platform_exception',
+      );
+    } catch (e, stackTrace) {
+      PopscopeLogger.error('$method failed: $e\n$stackTrace');
+      return const _NativeLifecycleCallResult(
+        success: false,
+        state: 'error',
+        reason: 'unknown_exception',
+      );
+    }
+  }
+
+  void _scheduleMissingRootRetryIfNeeded(_NativeLifecycleCallResult result) {
+    if (!result.isMissingRootFailure) {
+      return;
+    }
+
+    if (!_hasActiveBackIntentConsumer) {
+      _resetMissingRootRetry();
+      return;
+    }
+
+    if (_missingRootRetryScheduled) {
+      return;
+    }
+
+    if (_missingRootRetryAttempts >= _maxMissingRootRetryAttempts) {
+      _logBackIntent(action: 'missing_root_retry_exhausted');
+      return;
+    }
+
+    _missingRootRetryAttempts += 1;
+    final attempt = _missingRootRetryAttempts;
+    _missingRootRetryScheduled = true;
+    _logBackIntent(action: 'missing_root_retry_scheduled_$attempt');
+
+    void triggerRetry() {
+      _missingRootRetryScheduled = false;
+      if (!_hasActiveBackIntentConsumer) {
+        _resetMissingRootRetry();
+        return;
+      }
+      _scheduleNativeLifecycleSync(reason: 'missing_root_retry_$attempt');
+    }
+
+    try {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        triggerRetry();
+      });
+    } catch (_) {
+      Future<void>.delayed(const Duration(milliseconds: 16), triggerRetry);
+    }
+  }
+
+  void _resetMissingRootRetry() {
+    _missingRootRetryAttempts = 0;
+    _missingRootRetryScheduled = false;
   }
 
   void _transitionLifecycle(

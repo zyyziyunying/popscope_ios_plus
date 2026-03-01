@@ -18,6 +18,20 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     case emitted
   }
 
+  private struct LifecycleOperationResult {
+    let success: Bool
+    let state: GestureLifecycleState
+    let reason: String
+
+    func toDictionary() -> [String: Any] {
+      return [
+        "success": success,
+        "state": state.rawValue,
+        "reason": reason
+      ]
+    }
+  }
+
   /// 弱引用的 Navigation Controller
   ///
   /// 用于访问 interactivePopGestureRecognizer 来拦截左滑返回手势
@@ -120,15 +134,14 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
   ///
   /// 注意：插件禁止运行时替换 rootViewController。
   /// 如需拦截系统返回手势，请在宿主 App 启动阶段配置 UINavigationController。
-  @discardableResult
-  private func setupInteractivePopGestureIfNeeded() -> Bool {
+  private func setupInteractivePopGestureIfNeeded() -> (success: Bool, reason: String) {
     // 获取应用的窗口和根视图控制器
     guard let window = keyWindow(),
           let rootViewController = window.rootViewController else {
       // 无法获取 rootViewController，无法设置手势拦截
       self.navigationController = nil
       logBackIntent(action: "enable_failed_missing_root")
-      return false
+      return (false, "missing_root")
     }
 
     if let navController = rootViewController as? UINavigationController {
@@ -144,12 +157,12 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
       } else {
         logBackIntent(route: String(describing: type(of: flutterVC)), action: "enable_failed_missing_nav")
         self.navigationController = nil
-        return false
+        return (false, "missing_nav")
       }
     } else {
       logBackIntent(route: String(describing: type(of: rootViewController)), action: "enable_failed_unsupported_root")
       self.navigationController = nil
-      return false
+      return (false, "unsupported_root")
     }
     
     // 获取到 NavigationController 后，设置手势拦截
@@ -165,16 +178,15 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
   /// 1. 保存原始的手势识别器代理（用于处理其他手势）
   /// 2. 将自己设置为新的代理（用于拦截左滑返回手势）
   /// 3. 当手势触发时，gestureRecognizerShouldBegin 会被调用
-  @discardableResult
-  private func setupInteractivePopGesture() -> Bool {
+  private func setupInteractivePopGesture() -> (success: Bool, reason: String) {
     guard let interactiveGesture = self.navigationController?.interactivePopGestureRecognizer else {
       logBackIntent(action: "enable_failed_missing_interactiveGesture")
-      return false
+      return (false, "missing_interactive_gesture")
     }
 
     if interactiveGesture.delegate === self {
       logBackIntent(action: "enable_skip_already_hooked")
-      return true
+      return (true, "already_hooked")
     }
 
     // 保存原始的代理，用于处理非左滑返回的其他手势
@@ -185,7 +197,7 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     // gestureRecognizerShouldBegin 方法会被调用，可以进行拦截
     interactiveGesture.delegate = self
     logBackIntent(action: "enable_delegate_hooked")
-    return true
+    return (true, "delegate_hooked")
   }
 
   private func teardownInteractivePopGesture() {
@@ -202,29 +214,47 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     self.signalState = .idle
   }
 
-  private func enableInteractivePopGestureIfNeeded() {
+  private func enableInteractivePopGestureIfNeeded() -> LifecycleOperationResult {
     switch self.lifecycleState {
     case .enabled, .enabling:
       logBackIntent(source: "native-lifecycle", action: "enable_skip_\(self.lifecycleState.rawValue)")
-      return
+      return LifecycleOperationResult(
+        success: true,
+        state: self.lifecycleState,
+        reason: "skip_\(self.lifecycleState.rawValue)"
+      )
     case .disabled, .disabling:
       break
     }
 
     transitionLifecycle(to: .enabling, action: "enable_requested")
-    let enabled = setupInteractivePopGestureIfNeeded()
-    if enabled {
+    let setupResult = setupInteractivePopGestureIfNeeded()
+    if setupResult.success {
       transitionLifecycle(to: .enabled, action: "enable_completed")
+      return LifecycleOperationResult(
+        success: true,
+        state: .enabled,
+        reason: setupResult.reason
+      )
     } else {
       transitionLifecycle(to: .disabled, action: "enable_failed")
+      return LifecycleOperationResult(
+        success: false,
+        state: .disabled,
+        reason: setupResult.reason
+      )
     }
   }
 
-  private func disableInteractivePopGestureIfNeeded() {
+  private func disableInteractivePopGestureIfNeeded() -> LifecycleOperationResult {
     switch self.lifecycleState {
     case .disabled, .disabling:
       logBackIntent(source: "native-lifecycle", action: "disable_skip_\(self.lifecycleState.rawValue)")
-      return
+      return LifecycleOperationResult(
+        success: true,
+        state: self.lifecycleState,
+        reason: "skip_\(self.lifecycleState.rawValue)"
+      )
     case .enabled, .enabling:
       break
     }
@@ -232,6 +262,11 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     transitionLifecycle(to: .disabling, action: "disable_requested")
     teardownInteractivePopGesture()
     transitionLifecycle(to: .disabled, action: "disable_completed")
+    return LifecycleOperationResult(
+      success: true,
+      state: .disabled,
+      reason: "disable_completed"
+    )
   }
 
   /// 统一触发 Flutter 侧的返回手势回调
@@ -274,16 +309,24 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     case "enableInteractivePopGesture":
       // Flutter 层主动调用此方法来启用手势拦截
       // 必须在主线程执行，因为涉及 UI 操作
-      DispatchQueue.main.async {
-        self.enableInteractivePopGestureIfNeeded()
+      let execute = {
+        result(self.enableInteractivePopGestureIfNeeded().toDictionary())
       }
-      result(nil)
+      if Thread.isMainThread {
+        execute()
+      } else {
+        DispatchQueue.main.async(execute: execute)
+      }
     case "disableInteractivePopGesture":
       // Flutter 生命周期回收：无 consumer 时恢复系统默认 delegate
-      DispatchQueue.main.async {
-        self.disableInteractivePopGestureIfNeeded()
+      let execute = {
+        result(self.disableInteractivePopGestureIfNeeded().toDictionary())
       }
-      result(nil)
+      if Thread.isMainThread {
+        execute()
+      } else {
+        DispatchQueue.main.async(execute: execute)
+      }
     default:
       result(FlutterMethodNotImplemented)
     }
@@ -310,6 +353,19 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     if gestureRecognizer == self.navigationController?.interactivePopGestureRecognizer {
       guard self.lifecycleState == .enabled else {
         logBackIntent(action: "blocked_non_enabled_state")
+        return false
+      }
+
+      guard let navigationController = self.navigationController,
+            navigationController.viewControllers.count > 1 else {
+        logBackIntent(action: "blocked_insufficient_stack_depth")
+        return false
+      }
+
+      if let originalDelegate = self.originalDelegate,
+         let shouldBegin = originalDelegate.gestureRecognizerShouldBegin?(gestureRecognizer),
+         !shouldBegin {
+        logBackIntent(action: "blocked_by_original_delegate")
         return false
       }
 

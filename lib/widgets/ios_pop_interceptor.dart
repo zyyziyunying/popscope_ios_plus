@@ -53,6 +53,7 @@ class _IosPopInterceptorState extends State<IosPopInterceptor> {
   /// 是否已经注册回调
   bool _isRegistered = false;
   bool _directModeWarned = false;
+  bool _isHandlingPopIntent = false;
 
   bool get _shouldUseEdgeGuard {
     if (widget.enableEdgeGuard != null) {
@@ -73,8 +74,24 @@ class _IosPopInterceptorState extends State<IosPopInterceptor> {
     }
   }
 
+  void _dispatchPopIntent({required String source}) {
+    if (_isHandlingPopIntent) {
+      PopscopeLogger.debug('drop duplicated pop intent, source=$source');
+      return;
+    }
+
+    _isHandlingPopIntent = true;
+    try {
+      widget.onPopGesture();
+    } finally {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _isHandlingPopIntent = false;
+      });
+    }
+  }
+
   void _handlePopGesture() {
-    widget.onPopGesture();
+    _dispatchPopIntent(source: 'native_event');
   }
 
   void _registerCallbackIfNeeded() {
@@ -116,7 +133,7 @@ class _IosPopInterceptorState extends State<IosPopInterceptor> {
         /// 但 AppBar 返回按钮等 Flutter 组件的返回操作不会触发原生手势回调
         /// 需要通过 onPopInvokedWithResult 来统一处理
         if (!didPop) {
-          widget.onPopGesture();
+          _dispatchPopIntent(source: 'flutter_pop_invoked');
         }
       },
     );
