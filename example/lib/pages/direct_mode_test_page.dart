@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:popscope_ios_plus/popscope_ios.dart';
+import 'package:popscope_ios_plus/widgets/platform_popscope.dart';
 
 /// 直接模式测试页面
 ///
@@ -21,32 +21,24 @@ class DirectModeTestPage extends StatefulWidget {
 
 class _DirectModeTestPageState extends State<DirectModeTestPage> {
   int _gestureCount = 0;
-  bool _isRegistered = false;
   bool _directModeEnabled = false;
   final List<String> _logs = [];
 
   @override
   void initState() {
     super.initState();
-    _enableDirectMode();
-  }
-
-  Future<void> _enableDirectMode() async {
-    if (!Platform.isIOS) {
-      _addLog('非 iOS 平台，跳过直接模式启用');
-      return;
-    }
-
-    try {
-      // 启用直接模式
-      await PopscopeIos.enableDirectEdgeGestureForTesting();
-      setState(() {
-        _directModeEnabled = true;
-      });
-      _addLog('直接模式已启用');
-    } catch (e) {
-      _addLog('启用直接模式失败: $e');
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        setState(() {
+          _directModeEnabled = Platform.isIOS;
+        });
+        if (Platform.isIOS) {
+          _addLog('直接模式由组件启用（PlatformPopScope）');
+        } else {
+          _addLog('非 iOS 平台，直接模式不可用');
+        }
+      }
+    });
   }
 
   void _addLog(String message) {
@@ -67,139 +59,126 @@ class _DirectModeTestPageState extends State<DirectModeTestPage> {
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (Platform.isIOS && !_isRegistered) {
-      PopscopeIos.registerPopGestureCallback(_handlePopGesture, context);
-      _isRegistered = true;
-      _addLog('回调已注册');
-    }
-  }
-
-  @override
-  void dispose() {
-    if (Platform.isIOS && _isRegistered) {
-      PopscopeIos.unregisterPopGestureCallback(context);
-    }
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('直接模式测试'),
-        backgroundColor: Colors.orange,
-        foregroundColor: Colors.white,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // 状态卡片
-            _buildStatusCard(),
-            const SizedBox(height: 16),
+    return PlatformPopScope(
+      canPop: false,
+      useDirectEdgeGesture: true,
+      onPop: _handlePopGesture,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('直接模式测试'),
+          backgroundColor: Colors.orange,
+          foregroundColor: Colors.white,
+        ),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // 状态卡片
+              _buildStatusCard(),
+              const SizedBox(height: 16),
 
-            // 测试场景 1：基本手势触发
-            _buildTestSection(
-              '测试 1：基本手势触发',
-              '从屏幕左边缘向右滑动，观察手势触发次数是否增加。',
-              Icons.swipe_right,
-              Colors.green,
-            ),
+              // 测试场景 1：基本手势触发
+              _buildTestSection(
+                '测试 1：基本手势触发',
+                '从屏幕左边缘向右滑动，观察手势触发次数是否增加。',
+                Icons.swipe_right,
+                Colors.green,
+              ),
 
-            // 测试场景 2：与水平列表的冲突
-            _buildTestSection(
-              '测试 2：水平列表冲突测试',
-              '在下方水平列表中左右滑动，观察是否误触发边缘手势。',
-              Icons.view_list,
-              Colors.blue,
-            ),
+              // 测试场景 2：与水平列表的冲突
+              _buildTestSection(
+                '测试 2：水平列表冲突测试',
+                '在下方水平列表中左右滑动，观察是否误触发边缘手势。',
+                Icons.view_list,
+                Colors.blue,
+              ),
 
-            // 水平滑动列表
-            SizedBox(
-              height: 100,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: 20,
-                itemBuilder: (context, index) => Container(
-                  width: 100,
-                  margin: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.shade100,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.blue.shade300),
-                  ),
-                  child: Center(
-                    child: Text(
-                      'Item $index',
-                      style: TextStyle(
-                        color: Colors.blue.shade700,
-                        fontWeight: FontWeight.bold,
+              // 水平滑动列表
+              SizedBox(
+                height: 100,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: 20,
+                  itemBuilder: (context, index) => Container(
+                    width: 100,
+                    margin: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade100,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue.shade300),
+                    ),
+                    child: Center(
+                      child: Text(
+                        'Item $index',
+                        style: TextStyle(
+                          color: Colors.blue.shade700,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 16),
 
-            // 测试场景 3：垂直列表边缘滑动
-            _buildTestSection(
-              '测试 3：垂直列表边缘滑动',
-              '从下方列表左边缘开始向右滑动，测试是否能正确触发手势。',
-              Icons.list,
-              Colors.purple,
-            ),
-
-            // 垂直列表（紧贴左边缘）
-            Container(
-              height: 150,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.purple.shade300),
-                borderRadius: BorderRadius.circular(8),
+              // 测试场景 3：垂直列表边缘滑动
+              _buildTestSection(
+                '测试 3：垂直列表边缘滑动',
+                '从下方列表左边缘开始向右滑动，测试是否能正确触发手势。',
+                Icons.list,
+                Colors.purple,
               ),
-              child: ListView.builder(
-                itemCount: 10,
-                itemBuilder: (context, index) => ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: Colors.purple.shade100,
-                    child: Text('$index'),
+
+              // 垂直列表（紧贴左边缘）
+              Container(
+                height: 150,
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.purple.shade300),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: ListView.builder(
+                  itemCount: 10,
+                  itemBuilder: (context, index) => ListTile(
+                    leading: CircleAvatar(
+                      backgroundColor: Colors.purple.shade100,
+                      child: Text('$index'),
+                    ),
+                    title: Text('列表项 $index'),
+                    subtitle: const Text('从左边缘向右滑动测试'),
                   ),
-                  title: Text('列表项 $index'),
-                  subtitle: const Text('从左边缘向右滑动测试'),
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
+              const SizedBox(height: 16),
 
-            // 测试场景 4：灵敏度测试
-            _buildTestSection(
-              '测试 4：灵敏度测试',
-              '分别进行快速滑动和慢速滑动，观察触发的一致性。',
-              Icons.speed,
-              Colors.amber,
-            ),
-
-            // 日志区域
-            const SizedBox(height: 16),
-            _buildLogSection(),
-
-            // 返回按钮
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              onPressed: () => Navigator.pop(context),
-              icon: const Icon(Icons.arrow_back),
-              label: const Text('返回首页'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12),
+              // 测试场景 4：灵敏度测试
+              _buildTestSection(
+                '测试 4：灵敏度测试',
+                '分别进行快速滑动和慢速滑动，观察触发的一致性。',
+                Icons.speed,
+                Colors.amber,
               ),
-            ),
-            const SizedBox(height: 20),
-          ],
+
+              // 日志区域
+              const SizedBox(height: 16),
+              _buildLogSection(),
+
+              // 返回按钮
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                onPressed: () => Navigator.pop(context),
+                icon: const Icon(Icons.arrow_back),
+                label: const Text('返回首页'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
         ),
       ),
     );

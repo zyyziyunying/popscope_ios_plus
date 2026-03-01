@@ -15,6 +15,9 @@ class IosPopInterceptor extends StatefulWidget {
     super.key,
     required this.child,
     required this.onPopGesture,
+    this.useDirectEdgeGesture = false,
+    this.enableEdgeGuard,
+    this.edgeGuardWidth = 44,
   });
 
   /// 子组件
@@ -24,6 +27,21 @@ class IosPopInterceptor extends StatefulWidget {
   /// 当用户从左边缘向右滑动时调用
   final VoidCallback onPopGesture;
 
+  /// 是否启用实验性的直接边缘手势模式
+  ///
+  /// 启用后会先尝试调用原生 direct 模式，再注册回调，避免落回 interactive 模式。
+  final bool useDirectEdgeGesture;
+
+  /// 是否启用左边缘手势防护层
+  ///
+  /// 当 canPop 为 false 时，Flutter 自带的 iOS 侧滑返回仍可能触发，
+  /// 该防护层用于在组件层屏蔽左边缘的 Flutter 侧滑手势。
+  /// 默认在 useDirectEdgeGesture = true 时开启。
+  final bool? enableEdgeGuard;
+
+  /// 左边缘防护层宽度（逻辑像素）
+  final double edgeGuardWidth;
+
   @override
   State<IosPopInterceptor> createState() => _IosPopInterceptorState();
 }
@@ -31,21 +49,65 @@ class IosPopInterceptor extends StatefulWidget {
 class _IosPopInterceptorState extends State<IosPopInterceptor> {
   /// 是否已经注册回调
   bool _isRegistered = false;
+  bool _directModeEnabled = false;
+
+  bool get _shouldUseEdgeGuard {
+    if (widget.enableEdgeGuard != null) {
+      return widget.enableEdgeGuard!;
+    }
+    return widget.useDirectEdgeGesture;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (Platform.isIOS && widget.useDirectEdgeGesture) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _enableDirectMode();
+      });
+    }
+  }
+
+  Future<void> _enableDirectMode() async {
+    try {
+      await PopscopeIos.enableDirectEdgeGestureForTesting();
+      if (!mounted) return;
+      setState(() {
+        _directModeEnabled = true;
+      });
+      _registerCallbackIfNeeded();
+    } catch (_) {
+      if (!mounted) return;
+      // direct 模式失败时回退到默认注册流程
+      _registerCallbackIfNeeded();
+    }
+  }
 
   void _handlePopGesture() {
     widget.onPopGesture();
   }
 
+  void _registerCallbackIfNeeded() {
+    if (!Platform.isIOS || _isRegistered) {
+      return;
+    }
+    /// 使用注册机制，支持多个页面同时使用，避免回调覆盖
+    /// 传递 context 作为唯一标识，确保只有顶层页面的回调会被调用
+    /// 在 didChangeDependencies 中注册，确保 context 已准备好
+    PopscopeIos.registerPopGestureCallback(_handlePopGesture, context);
+    _isRegistered = true;
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (Platform.isIOS && !_isRegistered) {
-      /// 使用注册机制，支持多个页面同时使用，避免回调覆盖
-      /// 传递 context 作为唯一标识，确保只有顶层页面的回调会被调用
-      /// 在 didChangeDependencies 中注册，确保 context 已准备好
-      PopscopeIos.registerPopGestureCallback(_handlePopGesture, context);
-      _isRegistered = true;
+    if (widget.useDirectEdgeGesture) {
+      if (_directModeEnabled) {
+        _registerCallbackIfNeeded();
+      }
+      return;
     }
+    _registerCallbackIfNeeded();
   }
 
   @override
@@ -60,7 +122,7 @@ class _IosPopInterceptorState extends State<IosPopInterceptor> {
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
+    Widget content = PopScope(
       canPop: false,
       child: widget.child,
       onPopInvokedWithResult: (didPop, result) {
@@ -73,5 +135,27 @@ class _IosPopInterceptorState extends State<IosPopInterceptor> {
         }
       },
     );
+
+    if (Platform.isIOS &&
+        _shouldUseEdgeGuard &&
+        widget.edgeGuardWidth > 0) {
+      content = Stack(
+        children: [
+          content,
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: widget.edgeGuardWidth,
+            child: const AbsorbPointer(
+              absorbing: true,
+              child: SizedBox.expand(),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return content;
   }
 }

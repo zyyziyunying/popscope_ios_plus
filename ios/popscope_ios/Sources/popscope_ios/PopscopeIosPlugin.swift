@@ -31,10 +31,51 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
   /// 不依赖 UINavigationController。
   private var edgeGestureRecognizer: UIScreenEdgePanGestureRecognizer?
 
+  /// [实验性] 直接模式的备用全屏 Pan 手势识别器（仅左边缘生效）
+  ///
+  /// 当 UIScreenEdgePanGestureRecognizer 未触发时作为兜底验证。
+  private var edgeFallbackPanRecognizer: UIPanGestureRecognizer?
+
+  /// [实验性] 直接模式下监听系统 interactivePopGestureRecognizer
+  ///
+  /// 当存在 UINavigationController 时，追加 target 以确保能收到回调。
+  private weak var directModeInteractivePopGesture: UIGestureRecognizer?
+
+  /// [实验性] 备用 pan 手势的左边缘判定宽度（pt）
+  private let directEdgeFallbackWidth: CGFloat = 44
+
+  /// [实验性] 手势调试日志节流时间（秒）
+  private let gestureDebugInterval: TimeInterval = 0.3
+  private var lastGestureDebugTime: TimeInterval = 0
+
   /// [实验性] 弱引用的 FlutterViewController
   ///
   /// 直接模式下用于添加边缘手势识别器
   private weak var flutterViewController: FlutterViewController?
+
+  /// 获取当前的 keyWindow
+  ///
+  /// iOS 13+ 使用 connectedScenes 获取，避免 UIApplication.shared.windows 为空。
+  private func keyWindow() -> UIWindow? {
+    if #available(iOS 13.0, *) {
+      let scenes = UIApplication.shared.connectedScenes
+        .compactMap { $0 as? UIWindowScene }
+        .filter { $0.activationState == .foregroundActive }
+
+      let windows = scenes.flatMap { $0.windows }
+      if let key = windows.first(where: { $0.isKeyWindow }) {
+        return key
+      }
+
+      if let visible = windows.first(where: { !$0.isHidden }) {
+        return visible
+      }
+
+      return windows.first
+    }
+
+    return UIApplication.shared.keyWindow
+  }
   
   /// 插件注册入口
   ///
@@ -67,9 +108,10 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
   /// 建议在 AppDelegate 中预先配置 UINavigationController。
   private func setupInteractivePopGestureIfNeeded() {
     // 获取应用的窗口和根视图控制器
-    guard let window = UIApplication.shared.windows.first,
+    guard let window = keyWindow(),
           let rootViewController = window.rootViewController else {
       // 无法获取 rootViewController，无法设置手势拦截
+      NSLog("[PopscopeIos] Failed to get keyWindow or rootViewController for interactive mode")
       return
     }
 
@@ -123,6 +165,12 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     // 这样可以保持与其他手势识别器的兼容性
     self.originalDelegate = self.navigationController?.interactivePopGestureRecognizer?.delegate
 
+    // 进入交互模式时移除 direct 模式添加的 target，避免重复触发
+    if let popGesture = self.navigationController?.interactivePopGestureRecognizer {
+      popGesture.removeTarget(self, action: #selector(handleInteractivePopGesture(_:)))
+      self.directModeInteractivePopGesture = nil
+    }
+
     // 将自己设置为新的代理，这样当左滑手势触发时，
     // gestureRecognizerShouldBegin 方法会被调用，可以进行拦截
     self.navigationController?.interactivePopGestureRecognizer?.delegate = self
@@ -132,8 +180,8 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
 
   /// [实验性] 设置直接模式的边缘滑动手势识别
   ///
-  /// 该方法直接在 FlutterViewController.view 上添加 UIScreenEdgePanGestureRecognizer，
-  /// 不需要依赖 UINavigationController。
+  /// 该方法直接在 window 上添加 UIScreenEdgePanGestureRecognizer，
+  /// 尽量减少对 UINavigationController 的依赖。
   ///
   /// **优点**：
   /// - 不需要修改视图层次结构（不需要包装 NavigationController）
@@ -143,35 +191,72 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
   /// - 是否与 Flutter 内部手势冲突
   /// - 在滑动列表时是否误触发
   /// - 手势灵敏度是否可接受
-  private func setupDirectEdgeGesture() {
-    guard let window = UIApplication.shared.windows.first,
-          let rootVC = window.rootViewController else {
-      print("[PopscopeIos] Failed to get root view controller")
-      return
+  private func setupDirectEdgeGesture() -> [String: Any] {
+    var info: [String: Any] = [
+      "success": false,
+      "reason": "unknown"
+    ]
+
+    guard let window = keyWindow() else {
+      info["reason"] = "no_key_window"
+      NSLog("[PopscopeIos] Failed to get keyWindow for direct mode")
+      return info
+    }
+
+    guard let rootVC = window.rootViewController else {
+      info["reason"] = "no_root_view_controller"
+      NSLog("[PopscopeIos] Failed to get rootViewController for direct mode")
+      return info
     }
 
     // 获取 FlutterViewController
+    info["rootViewController"] = String(describing: type(of: rootVC))
+
     let flutterVC: FlutterViewController?
+    var navController: UINavigationController?
     if let fvc = rootVC as? FlutterViewController {
       flutterVC = fvc
+      navController = fvc.navigationController
     } else if let navVC = rootVC as? UINavigationController,
               let fvc = navVC.viewControllers.first as? FlutterViewController {
       flutterVC = fvc
+      navController = navVC
     } else {
       flutterVC = nil
     }
 
     guard let targetVC = flutterVC else {
-      print("[PopscopeIos] Failed to find FlutterViewController")
-      return
+      info["reason"] = "no_flutter_view_controller"
+      NSLog("[PopscopeIos] Failed to find FlutterViewController")
+      return info
     }
 
     // 保存引用
     self.flutterViewController = targetVC
+    if let navController = navController {
+      self.navigationController = navController
+      if let popGesture = navController.interactivePopGestureRecognizer {
+        // 直接模式下追加 target，确保系统返回手势也能通知到 Flutter
+        popGesture.removeTarget(self, action: #selector(handleInteractivePopGesture(_:)))
+        popGesture.addTarget(self, action: #selector(handleInteractivePopGesture(_:)))
+        self.directModeInteractivePopGesture = popGesture
+        info["interactivePopObserver"] = true
+        info["interactivePopEnabled"] = popGesture.isEnabled
+      } else {
+        info["interactivePopObserver"] = false
+      }
+    }
+
+    // 确保 view 已加载，避免无法添加手势
+    targetVC.loadViewIfNeeded()
 
     // 移除已有的边缘手势（如果有）
     if let existingGesture = self.edgeGestureRecognizer {
-      targetVC.view.removeGestureRecognizer(existingGesture)
+      existingGesture.view?.removeGestureRecognizer(existingGesture)
+    }
+    // 移除已有的备用 pan 手势（如果有）
+    if let existingFallback = self.edgeFallbackPanRecognizer {
+      existingFallback.view?.removeGestureRecognizer(existingFallback)
     }
 
     // 创建新的边缘手势识别器
@@ -181,12 +266,35 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     )
     edgeGesture.edges = .left
     edgeGesture.delegate = self
+    edgeGesture.cancelsTouchesInView = false
+    edgeGesture.delaysTouchesBegan = false
+    edgeGesture.delaysTouchesEnded = false
+    edgeGesture.requiresExclusiveTouchType = false
 
-    // 添加到 FlutterViewController 的 view
-    targetVC.view.addGestureRecognizer(edgeGesture)
+    // 添加到 window 上，避免被 Flutter 视图层吞掉触摸
+    window.addGestureRecognizer(edgeGesture)
     self.edgeGestureRecognizer = edgeGesture
 
-    print("[PopscopeIos] Direct edge gesture setup completed")
+    // 备用 Pan 手势：只在左边缘触发，用于验证触摸是否能到达
+    let fallbackPan = UIPanGestureRecognizer(
+      target: self,
+      action: #selector(handleFallbackPan(_:))
+    )
+    fallbackPan.maximumNumberOfTouches = 1
+    fallbackPan.minimumNumberOfTouches = 1
+    fallbackPan.delegate = self
+    fallbackPan.cancelsTouchesInView = false
+    fallbackPan.delaysTouchesBegan = false
+    fallbackPan.delaysTouchesEnded = false
+    window.addGestureRecognizer(fallbackPan)
+    self.edgeFallbackPanRecognizer = fallbackPan
+    info["fallbackPanHost"] = "window"
+
+    info["success"] = true
+    info["reason"] = "ok"
+    info["gestureHost"] = "window"
+    NSLog("[PopscopeIos] Direct edge gesture setup completed")
+    return info
   }
 
   /// [实验性] 处理边缘滑动手势
@@ -196,8 +304,7 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     switch recognizer.state {
     case .began:
       // 手势开始时触发回调
-      channel?.invokeMethod("onSystemBackGesture", arguments: nil)
-      print("[PopscopeIos] Edge swipe detected (direct mode)")
+      emitSystemBackGesture(source: "direct-edge")
     case .changed:
       // 可选：手势进行中，可用于实现跟手动画（MVP 不实现）
       break
@@ -207,6 +314,28 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     default:
       break
     }
+  }
+
+  /// [实验性] 处理系统 interactivePopGestureRecognizer 的回调
+  ///
+  /// 直接模式下为系统手势追加 target，确保也能触发 Flutter 回调
+  @objc private func handleInteractivePopGesture(_ recognizer: UIGestureRecognizer) {
+    if recognizer.state == .began {
+      emitSystemBackGesture(source: "interactive-pop")
+    }
+  }
+
+  /// [实验性] 处理备用 Pan 手势（仅左边缘判定通过后触发）
+  @objc private func handleFallbackPan(_ recognizer: UIPanGestureRecognizer) {
+    if recognizer.state == .began {
+      emitSystemBackGesture(source: "fallback-pan")
+    }
+  }
+
+  /// 统一触发 Flutter 侧的返回手势回调
+  private func emitSystemBackGesture(source: String) {
+    channel?.invokeMethod("onSystemBackGesture", arguments: ["source": source])
+    NSLog("[PopscopeIos] System back gesture detected (source: \(source))")
   }
 
   /// 处理来自 Flutter 层的方法调用
@@ -223,6 +352,7 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     case "enableInteractivePopGesture":
       // Flutter 层主动调用此方法来启用手势拦截
       // 必须在主线程执行，因为涉及 UI 操作（修改 rootViewController）
+      NSLog("[PopscopeIos] enableInteractivePopGesture called")
       DispatchQueue.main.async {
         self.setupInteractivePopGestureIfNeeded()
       }
@@ -230,10 +360,11 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     case "enableDirectEdgeGesture":
       // [实验性] Flutter 层调用此方法来启用直接边缘手势模式
       // 必须在主线程执行，因为涉及 UI 操作
+      NSLog("[PopscopeIos] enableDirectEdgeGesture called")
       DispatchQueue.main.async {
-        self.setupDirectEdgeGesture()
+        let info = self.setupDirectEdgeGesture()
+        result(info)
       }
-      result(nil)
     default:
       result(FlutterMethodNotImplemented)
     }
@@ -256,9 +387,26 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
   /// - Parameter gestureRecognizer: 准备开始识别的手势识别器
   /// - Returns: true 表示允许手势识别，false 表示阻止手势识别
   public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    // 直接模式的边缘手势应始终允许开始识别
+    if gestureRecognizer == self.edgeGestureRecognizer {
+      return true
+    }
+
+    // 直接模式的备用 pan 手势：仅允许左边缘向右滑动
+    if gestureRecognizer == self.edgeFallbackPanRecognizer {
+      guard let window = keyWindow() else {
+        return false
+      }
+      let location = gestureRecognizer.location(in: window)
+      if location.x > directEdgeFallbackWidth {
+        return false
+      }
+      return true
+    }
+
     // 检测到系统左滑手势，发送事件给 Flutter
     if gestureRecognizer == self.navigationController?.interactivePopGestureRecognizer {
-      channel?.invokeMethod("onSystemBackGesture", arguments: nil)
+      emitSystemBackGesture(source: "interactive-pop")
       // 返回 false 阻止系统默认的返回行为，由 Flutter 层处理
       return false
     }
@@ -275,6 +423,26 @@ public class PopscopeIosPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
   ///
   /// 这样可以确保插件不会影响其他手势识别器的正常工作
   public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+    return true
+  }
+
+  /// 手势触摸回调（调试用）
+  public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+    let isDirectEdge = gestureRecognizer == self.edgeGestureRecognizer
+    let isFallback = gestureRecognizer == self.edgeFallbackPanRecognizer
+    let isInteractivePop = gestureRecognizer == self.directModeInteractivePopGesture
+    guard isDirectEdge || isFallback || isInteractivePop else {
+      return true
+    }
+
+    let now = CACurrentMediaTime()
+    if now - lastGestureDebugTime >= gestureDebugInterval {
+      lastGestureDebugTime = now
+      let window = keyWindow()
+      let location = touch.location(in: window)
+      let source = isDirectEdge ? "direct-edge" : (isFallback ? "fallback-pan" : "interactive-pop")
+      NSLog("[PopscopeIos] Gesture touch received (source: \(source), location: \(location))")
+    }
     return true
   }
 }

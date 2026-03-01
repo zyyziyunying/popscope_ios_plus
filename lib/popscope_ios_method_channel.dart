@@ -90,6 +90,13 @@ class MethodChannelPopscopeIos extends PopscopeIosPlatform {
   Future<dynamic> _handleMethodCall(MethodCall call) async {
     switch (call.method) {
       case 'onSystemBackGesture':
+        if (call.arguments is Map) {
+          final args = Map<String, dynamic>.from(call.arguments as Map);
+          final source = args['source'];
+          if (source != null) {
+            PopscopeLogger.debug('onSystemBackGesture source: $source');
+          }
+        }
         await _handleSystemBackGesture();
         break;
       default:
@@ -99,7 +106,14 @@ class MethodChannelPopscopeIos extends PopscopeIosPlatform {
 
   /// 处理系统返回手势事件
   Future<void> _handleSystemBackGesture() async {
-    // 1. 如果设置了自动处理导航，尝试调用 maybePop()
+    // 1. 优先交给页面/业务层回调处理（WebView 等场景可先消费事件）
+    final callback = _findAndCleanValidCallback() ?? _onSystemBackGesture;
+    if (callback != null) {
+      callback();
+      return;
+    }
+
+    // 2. 没有可用回调时，再走自动导航
     if (_autoHandleNavigation) {
       final navigator = _navigatorKey?.currentState;
       if (navigator != null) {
@@ -108,10 +122,6 @@ class MethodChannelPopscopeIos extends PopscopeIosPlatform {
         PopscopeLogger.warn('NavigatorState is null, cannot pop');
       }
     }
-
-    // 2. 调用用户自定义回调（无论是否自动处理）
-    final callback = _findAndCleanValidCallback() ?? _onSystemBackGesture;
-    callback?.call();
   }
 
   /// 查找并清理有效的回调
@@ -178,10 +188,7 @@ class MethodChannelPopscopeIos extends PopscopeIosPlatform {
   }
 
   @override
-  void registerPopGestureCallback(
-    VoidCallback callback,
-    BuildContext context,
-  ) {
+  void registerPopGestureCallback(VoidCallback callback, BuildContext context) {
     _ensureHandlerInitialized();
 
     // 添加断言检查
@@ -271,13 +278,29 @@ class MethodChannelPopscopeIos extends PopscopeIosPlatform {
   Future<void> enableDirectEdgeGesture() async {
     _ensureHandlerInitialized();
     try {
-      await methodChannel.invokeMethod('enableDirectEdgeGesture');
+      final result = await methodChannel.invokeMethod(
+        'enableDirectEdgeGesture',
+      );
+      bool success = false;
+      if (result is bool) {
+        success = result;
+      } else if (result is Map) {
+        final info = Map<String, dynamic>.from(result);
+        success = info['success'] == true;
+        PopscopeLogger.debug('Direct edge gesture setup info: $info');
+      }
+
+      if (!success) {
+        PopscopeLogger.warn(
+          'Direct edge gesture setup failed on iOS (result: $result)',
+        );
+        return;
+      }
+
       _iosGestureEnabled = true;
       PopscopeLogger.debug('Direct edge gesture mode enabled');
     } catch (e, stackTrace) {
-      PopscopeLogger.error(
-        'enableDirectEdgeGesture failed: $e\n$stackTrace',
-      );
+      PopscopeLogger.error('enableDirectEdgeGesture failed: $e\n$stackTrace');
       rethrow;
     }
   }

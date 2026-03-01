@@ -88,7 +88,7 @@ class PopscopeIos {
   /// 注意：
   /// - ⚠️ 此方法会直接替换回调，多个页面使用时会有覆盖问题
   /// - 推荐使用 [registerPopGestureCallback] 和 [unregisterPopGestureCallback] 来管理回调
-  /// - 如果同时设置了 [setNavigatorKey]，会先自动调用 maybePop()，然后再执行此回调
+  /// - 如果同时设置了 [setNavigatorKey]，会优先执行此回调；仅当没有可用回调时才会自动 maybePop()
   /// - 如果只设置此回调而不设置 [setNavigatorKey]，则需要在回调中自行处理页面返回
   ///
   /// 示例：

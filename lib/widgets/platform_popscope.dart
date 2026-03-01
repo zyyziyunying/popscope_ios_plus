@@ -14,17 +14,29 @@ class PlatformPopScope extends StatelessWidget {
     required this.child,
     required this.canPop,
     required this.onPop,
+    this.useDirectEdgeGesture = false,
+    this.enableEdgeGuard,
+    this.edgeGuardWidth = 44,
   });
 
   final Widget child;
   final bool canPop;
   final VoidCallback onPop;
+  final bool useDirectEdgeGesture;
+  final bool? enableEdgeGuard;
+  final double edgeGuardWidth;
 
   @override
   Widget build(BuildContext context) {
     /// iOS 平台且 canPop 为 false 时，使用手势拦截器
     if (Platform.isIOS && !canPop) {
-      return IosPopInterceptor(onPopGesture: onPop, child: child);
+      return IosPopInterceptor(
+        onPopGesture: onPop,
+        useDirectEdgeGesture: useDirectEdgeGesture,
+        enableEdgeGuard: enableEdgeGuard,
+        edgeGuardWidth: edgeGuardWidth,
+        child: child,
+      );
     }
 
     /// 其他情况使用标准 PopScope
