@@ -1,5 +1,11 @@
 # Repository Guidelines
 
+## Project Goal
+- 核心目标：在 iOS 侧实现类似 Android `PopScope` 的返回拦截能力。
+- 现实约束：iOS 没有直接可用的“返回意图（back intent）”信号，Flutter 也无法直接获取。
+- 项目策略：由插件主动“创造”并向 Flutter 暴露稳定、可控的类 back intent 信号（基于 iOS 手势与导航状态）。
+- 最终效果：业务接入组件后，受影响页面在 iOS 上也能获得接近 Android `PopScope` 的可控返回体验。
+
 ## Project Structure & Module Organization
 - `lib/` contains the Dart API. Key files: `popscope_ios.dart`, `popscope_ios_method_channel.dart`, `popscope_ios_platform_interface.dart`, plus `widgets/` and `utils/`.
 - `ios/popscope_ios/Sources/popscope_ios/` contains the Swift plugin (`PopscopeIosPlugin.swift`) and iOS privacy file.

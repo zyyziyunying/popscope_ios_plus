@@ -21,16 +21,23 @@ popscope_ios 的核心功能是拦截 iOS 左滑返回手势。原有方案依�
 
 ### 核心思路
 
-使用 `UIScreenEdgePanGestureRecognizer` 直接在 `FlutterViewController.view` 上监听左边缘滑动手势，完全绕过对 `UINavigationController` 的依赖。
+使用 `UIScreenEdgePanGestureRecognizer` 直接在 `UIWindow` 上监听左边缘滑动手势，尽量绕过对 `UINavigationController` 的依赖。
+
+为提高可用性，直接模式同时提供两条兜底路径：
+
+1. **系统 interactivePopGestureRecognizer 监听**：当存在 `UINavigationController` 时，为系统手势追加 target，以保证能收到回调。
+2. **备用 Pan 手势**：在窗口上添加 `UIPanGestureRecognizer`，仅当手指起始点在左边缘且水平向右时才允许开始识别。
 
 ### 工作原理
 
 ```
 用户从屏幕左边缘滑动
        ↓
-UIScreenEdgePanGestureRecognizer 识别手势
+优先尝试 UIScreenEdgePanGestureRecognizer（window）
        ↓
-handleEdgeSwipe(_:) 在 .began 状态触发
+若系统返回手势存在，则 interactivePopGestureRecognizer 也会触发
+       ↓
+备用 Pan 手势（仅左边缘）作为补充验证
        ↓
 通过 MethodChannel 调用 "onSystemBackGesture"
        ↓
@@ -56,9 +63,9 @@ Flutter 层 _handleSystemBackGesture() 处理
 
 **`PopscopeIosPlugin.swift`**
 
-- 新增属性：`edgeGestureRecognizer`（边缘手势识别器）、`flutterViewController`（弱引用）
-- 新增方法：`setupDirectEdgeGesture()` — 在 FlutterViewController.view 上添加边缘手势
-- 新增方法：`handleEdgeSwipe(_:)` — 处理边缘滑动，在 `.began` 时通知 Flutter
+- 新增属性：`edgeGestureRecognizer`（边缘手势识别器）、`edgeFallbackPanRecognizer`（备用 pan 手势）、`directModeInteractivePopGesture`（系统手势监听）、`flutterViewController`（弱引用）
+- 新增方法：`setupDirectEdgeGesture()` — 在 window 上添加边缘手势与备用 pan 手势，并监听 interactivePopGestureRecognizer
+- 新增方法：`handleEdgeSwipe(_:)` / `handleFallbackPan(_:)` / `handleInteractivePopGesture(_:)` — 在 `.began` 时通知 Flutter
 - 新增 MethodChannel 处理：`enableDirectEdgeGesture` 方法调用
 
 ### Dart 层
@@ -87,6 +94,14 @@ Flutter 层 _handleSystemBackGesture() 处理
 
 - 首页新增"直接模式测试"入口卡片
 
+## 自动化测试覆盖
+
+- **MethodChannel 单测**：新增 `enableDirectEdgeGesture` 的调用覆盖与互斥校验。
+  - 文件：`test/popscope_ios_method_channel_test.dart`
+  - 验证点：
+    1. 调用 `enableDirectEdgeGesture` 会触发对应的 method channel
+    2. direct 模式启用后不会再触发 `enableInteractivePopGesture`
+
 ## MVP 验证要点
 
 ### 必须验证
@@ -101,13 +116,14 @@ Flutter 层 _handleSystemBackGesture() 处理
 
 ### 已知风险
 
-1. **Flutter 内部手势竞争**：`FlutterViewController` 内部有自己的手势处理系统，`UIScreenEdgePanGestureRecognizer` 可能与 Flutter 的 `UIPanGestureRecognizer` 产生竞争。当前通过 `shouldRecognizeSimultaneouslyWith` 返回 `true` 允许同时识别，但可能导致 `PageView`、`TabBarView` 等水平滑动组件同时响应。
+1. **Flutter 内部手势竞争**：`FlutterViewController` 内部有自己的手势处理系统，`UIScreenEdgePanGestureRecognizer` 或备用 pan 可能与 Flutter 的水平手势产生竞争。当前通过 `shouldRecognizeSimultaneouslyWith` 返回 `true` 允许同时识别，但可能导致 `PageView`、`TabBarView` 等水平滑动组件同时响应。
 
 2. **`.began` 触发时机**：当前在手势 `.began` 状态就触发回调，即使用户随后取消手势（手指没有继续滑动）也会触发。后续可考虑在 `.ended` 且滑动距离超过阈值时才触发，或在 `.cancelled` 时通知 Flutter 取消。
 
 3. **两种模式互斥**：直接模式和原有模式共用 `_iosGestureEnabled` 标志，不应同时启用。
 
-4. **`UIApplication.shared.windows` 已废弃**：iOS 15+ 标记为 deprecated，后续正式化时需改用 `UIApplication.shared.connectedScenes`。
+4. **系统手势重复触发**：direct 模式同时监听系统返回手势与自定义手势，可能产生重复回调，需要观察并评估去重策略。
+5. **多窗口场景**：已改用 `connectedScenes` 获取 keyWindow，但多窗口/非 keyWindow 场景仍需验证。
 
 ## 后续方向
 
@@ -117,4 +133,4 @@ Flutter 层 _handleSystemBackGesture() 处理
 2. 评估是否需要保留原有方案作为 fallback
 3. 处理 `.cancelled` 状态，支持手势取消通知
 4. 考虑利用 `.changed` 状态实现跟手动画
-5. 替换 deprecated 的 `UIApplication.shared.windows` API
+5. 继续验证 `connectedScenes` 在多窗口/前后台切换场景的稳定性
