@@ -21,6 +21,9 @@ void main() {
           if (methodCall.method == 'enableInteractivePopGesture') {
             return null;
           }
+          if (methodCall.method == 'disableInteractivePopGesture') {
+            return null;
+          }
           return null;
         });
   });
@@ -258,6 +261,90 @@ void main() {
         expect(enableCalled, true);
       },
     );
+  });
+
+  group('gesture lifecycle', () {
+    test('清除最后一个业务回调时应触发 disableInteractivePopGesture', () async {
+      int enableCount = 0;
+      int disableCount = 0;
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+            if (methodCall.method == 'enableInteractivePopGesture') {
+              enableCount++;
+            }
+            if (methodCall.method == 'disableInteractivePopGesture') {
+              disableCount++;
+            }
+            return null;
+          });
+
+      platform.setOnSystemBackGesture(() {});
+      await Future.delayed(const Duration(milliseconds: 10));
+
+      platform.setOnSystemBackGesture(null);
+      await Future.delayed(const Duration(milliseconds: 10));
+
+      expect(enableCount, 1);
+      expect(disableCount, 1);
+    });
+
+    test('重复启用同一能力时应保持幂等（只触发一次 enable）', () async {
+      int enableCount = 0;
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+            if (methodCall.method == 'enableInteractivePopGesture') {
+              enableCount++;
+            }
+            return null;
+          });
+
+      platform.setOnSystemBackGesture(() {});
+      platform.setOnSystemBackGesture(() {});
+      await Future.delayed(const Duration(milliseconds: 10));
+
+      expect(enableCount, 1);
+    });
+
+    testWidgets('注销最后一个页面回调后应触发 disableInteractivePopGesture', (
+      WidgetTester tester,
+    ) async {
+      int enableCount = 0;
+      int disableCount = 0;
+      late BuildContext pageContext;
+
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (MethodCall methodCall) async {
+            if (methodCall.method == 'enableInteractivePopGesture') {
+              enableCount++;
+            }
+            if (methodCall.method == 'disableInteractivePopGesture') {
+              disableCount++;
+            }
+            return null;
+          });
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) {
+              pageContext = context;
+              return const SizedBox.shrink();
+            },
+          ),
+        ),
+      );
+
+      platform.registerPopGestureCallback(() {}, pageContext);
+      await tester.pump(const Duration(milliseconds: 10));
+
+      platform.unregisterPopGestureCallback(pageContext);
+      await tester.pump(const Duration(milliseconds: 10));
+
+      expect(enableCount, 1);
+      expect(disableCount, 1);
+    });
   });
 
   group('direct mode decommissioned', () {

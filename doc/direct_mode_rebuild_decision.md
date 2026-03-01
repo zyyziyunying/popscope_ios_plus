@@ -138,3 +138,10 @@
 
 1. 新建“单一信号源 + 状态机 + 生命周期回收”最小实现骨架。  
 2. 先补测试矩阵草案，再开放新的示例入口。
+
+### 已完成（M1-骨架，2026-03-01）
+
+1. iOS 端新增 interactive-pop 生命周期状态机（`disabled/enabling/enabled/disabling`），并补齐 `enable/disable` 成对通道。  
+2. Dart 端新增原生生命周期同步器：基于 consumer 状态自动启停原生手势钩子，避免页面退出后残留。  
+3. 新增结构化日志字段（`source/state/route/action`）并贯穿 native -> Dart 事件链路。  
+4. 补充 MethodChannel 生命周期单测：验证 disable 回收与 enable 幂等行为。
