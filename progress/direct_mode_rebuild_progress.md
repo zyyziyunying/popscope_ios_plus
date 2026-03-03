@@ -1,11 +1,11 @@
 # Direct Mode 重构进度追踪
 
-> 最后更新：2026-03-01  
+> 最后更新：2026-03-02  
 > 负责人：Codex（执行）/ Owner（决策）
 
 ## 1. 当前状态
 
-- 阶段：`M1 收口中`（G4 自动化门槛已通过，剩余 G5 手测矩阵）
+- 阶段：`M1 收口中`（G4 自动化门槛已通过，G5 手测矩阵已拆解待执行）
 - 总策略：停止修补旧 Direct Mode，实现重构版新链路
 - 决策依据：`doc/direct_mode_rebuild_decision.md`
 - 准入门槛：`doc/direct_mode_m1_to_m2_gate.md`
@@ -17,7 +17,7 @@
 - [ ] M2：补齐测试矩阵（单测/集成/手测）
 - [ ] M3：灰度开放新示例并验证复杂场景
 
-## 3. 本次已完成内容（2026-03-01）
+## 3. 已完成内容（截至 2026-03-02）
 
 1. iOS 端已移除 Direct Mode 旧实验方法/回调链路。  
 2. iOS 端已禁止运行时替换 `rootViewController`。  
@@ -36,10 +36,11 @@
 15. iOS delegate 已补栈深度判断，并与原 delegate 协同判定，降低误触发概率。  
 16. MethodChannel 单测新增：enable 失败回滚重试、`missing_root` 自动重试。  
 17. `example/integration_test` 已补齐 5 条核心手势链路，并在 iOS 模拟器通过执行。  
+18. 已新增 G5 手测矩阵执行清单（`progress/g5_manual_test_matrix.md`），用于真机/模拟器统一回填证据。  
 
 ## 4. 当前阻塞（M1 -> M2）
 
-1. G5 手测矩阵（WebView/横滑组件/多路由/快速手势/前后台切换）尚未补齐。  
+1. G5 手测矩阵（WebView/横滑组件/多路由/快速手势/前后台切换）已拆解但尚未执行回填。  
 2. 缺少“1 台 iOS 真机 + 1 套模拟器”的手测记录表与问题单归档。  
 3. `missing_root` 重试策略已落地，但复杂宿主启动时序仍需真机回归确认。
 
@@ -49,11 +50,12 @@
 - `cd example && flutter test integration_test/plugin_integration_test.dart -d 563ABB01-D10A-44EF-9C16-6A8ABD33A73C`：通过（2026-03-01，5/5）  
 - `flutter analyze`：存在 5 条 info（deprecated 用法），无 error/warning（命令退出码为 1）
 
-## 6. 下一会话建议待办（M1 收口清单）
+## 6. 下一步执行清单（M1 收口清单，2026-03-02）
 
-1. 按 `doc/direct_mode_m1_to_m2_gate.md` 完成 G5 手测矩阵并沉淀记录表。  
-2. 增加 iOS 真机回归：`missing_root` 重试在不同宿主启动时序下的稳定性。  
-3. 回填 Gate 评审表（责任人/日期/证据链接）并给出最终 M1 -> M2 判定。  
+1. 按 `progress/g5_manual_test_matrix.md` 执行 G5-01 ~ G5-05（先真机后模拟器），逐条回填结果、证据与问题单。  
+2. 聚焦 `missing_root` 回归：至少覆盖冷启动首帧/热启动返回/前后台切换后恢复 3 类时序。  
+3. 执行完成后，更新 `doc/direct_mode_m1_to_m2_gate.md` 的 G1/G2/G3/G5 Gate 结果与证据栏。  
+4. 最后同步本文件“当前状态/阻塞项/验证结果”，给出明确结论：`PASS` 或 `FAIL`（M1 -> M2）。  
 
 ## 7. 风险与注意事项
 
